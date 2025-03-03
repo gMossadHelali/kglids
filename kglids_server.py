@@ -10,14 +10,15 @@ from datetime import datetime
 import multiprocessing as mp
 
 from kglids_config import KGLiDSConfig
-from server_utils import query_graph, upload_graph, get_graph_content, create_evaluation_embedding_dbs, add_has_eda_ops_column_to_embedding_db
+from server_utils import (query_graph, create_evaluation_embedding_dbs, add_has_eda_ops_column_to_embedding_db,
+                          upload_dataset_subgraph_to_evaluation_graph, upload_pipeline_subgraph_to_evaluation_graph)
 from storage_utils.graphdb_utils import create_graphdb_repo
 from kg_governor.data_profiling.fine_grained_type_detector import FineGrainedColumnTypeDetector
 from kg_governor.data_profiling.profile_creators.profile_creator import ProfileCreator
 from kg_governor.data_profiling.model.column_profile import ColumnProfile
 from kg_governor.data_profiling.model.table import Table
 
-flask_app = flask.Flask(__name__)
+app = flask.Flask(__name__)
 
 fasttext_model_300 = fasttext.load_model(os.path.join(KGLiDSConfig.base_dir, 'storage/embeddings/cc.en.300.bin'))
 fasttext_model_50 = fasttext.load_model(os.path.join(KGLiDSConfig.base_dir, 'storage/embeddings/cc.en.50.bin'))
@@ -29,11 +30,10 @@ def initialize_autoeda():
     add_has_eda_ops_column_to_embedding_db(embedding_db_name, graphdb_endpoint)
 
 
-def profile_column(args):
+def profile_column(column):
     # profiles each column by analyzing its fine-grained type and generating the embedding
-    df, column_name = args
     # profile the column and generate its embeddings
-    column = pd.to_numeric(df[column_name], errors='ignore')
+    column = pd.to_numeric(column, errors='ignore')
     column = column.convert_dtypes()
     column = column.astype(str) if column.dtype == object else column
 
@@ -43,14 +43,14 @@ def profile_column(args):
                                                                                            'query'),
                                                                 fasttext_model_50)
     column_profile: ColumnProfile = column_profile_creator.create_profile()
-
+    print('2-', column.name)
     if column_profile.get_embedding():
         content_embedding = column_profile.get_embedding()
     else:
         # boolean columns
         content_embedding = [column_profile.get_true_ratio()] * 300
 
-    sanitized_name = column_name.replace('\n', ' ').replace('_', ' ').strip()
+    sanitized_name = column.name.replace('\n', ' ').replace('_', ' ').strip()
     label_embedding = fasttext_model_300.get_sentence_vector(sanitized_name).tolist()
 
     content_label_embedding = content_embedding + label_embedding
@@ -67,7 +67,7 @@ def profile_column(args):
     return column_info
 
 
-@flask_app.route('/profile_query_table', methods=['POST'])
+@app.route('/profile_query_table', methods=['POST'])
 def profile_query_table():
     embedding_db_name = request.args.get('embedding_db_name')
     print(embedding_db_name)
@@ -75,9 +75,9 @@ def profile_query_table():
     df = pd.read_csv(file)
 
     print(datetime.now(), 'Received CSV file. Profiling and storing embeddings...')
-    profile_args = [(df, column_name) for column_name in df.columns]
+    columns = [df[column_name] for column_name in df.columns]
     pool = mp.Pool()
-    column_info = list(tqdm(pool.imap_unordered(profile_column, profile_args), total=len(profile_args)))
+    column_info = list(tqdm(pool.imap_unordered(profile_column, columns), total=len(columns)))
 
     # query vector DB
     conn = psycopg.connect(dbname=embedding_db_name, user='postgres', password='postgres', autocommit=True)
@@ -99,7 +99,7 @@ def profile_query_table():
     return flask.jsonify(return_data)
 
 
-@flask_app.route('/find_similar_columns', methods=['POST'])
+@app.route('/find_similar_columns', methods=['POST'])
 def find_similar_columns():
 
     column_name = request.get_json().get('main_column_name', '')
@@ -132,7 +132,7 @@ def find_similar_columns():
     return flask.jsonify(return_data)
 
 
-@flask_app.route('/fetch_eda_operations', methods=['POST'])
+@app.route('/fetch_eda_operations', methods=['POST'])
 def fetch_eda_operations():
     similar_column_id = request.get_json().get('similar_column_id', '')
     main_column_name = request.get_json().get('main_column_name', '')
@@ -284,7 +284,7 @@ def fetch_eda_operations():
     return flask.jsonify(eda_operations)
 
 
-@flask_app.route('/create_evaluation_graphs_and_databases', methods=['POST'])
+@app.route('/create_evaluation_graphs_and_databases', methods=['POST'])
 def create_evaluation_graphs_and_databases():
     graphdb_endpoint = 'http://localhost:7200'
 
@@ -311,19 +311,11 @@ def create_evaluation_graphs_and_databases():
     data_source_uri = result[0]['source']['value']
     # 1. copy dataset subgraph from default graphs
     print("Populating dataset subgraphs for", graphdb_autoeda_repo)
-    for dataset_id in tqdm(autoeda_dataset_ids):
-        dataset_uri = f"<{data_source_uri}/{dataset_id}>"
-        graph_query = """
-        PREFIX kglids: <http://kglids.org/ontology/>
-        construct {?s ?p ?o}
-        WHERE {
-        ?s kglids:isPartOf+ %s.
-        ?s ?p ?o . 
-        } """ % dataset_uri
-        graph_content = get_graph_content(
-            graphdb_endpoint, graphdb_all_kaggle_repo, graph_query=graph_query
-        )
-        upload_graph(graph_content, graphdb_endpoint, graphdb_autoeda_repo)
+    args = [(data_source_uri, dataset_id, graphdb_endpoint, graphdb_all_kaggle_repo, graphdb_autoeda_repo)
+            for dataset_id in autoeda_dataset_ids]
+    pool = mp.Pool()
+    list(tqdm(pool.imap_unordered(upload_dataset_subgraph_to_evaluation_graph, args), total=len(args)))
+
 
     # 2. copy pipeline graphs
     query = """
@@ -347,11 +339,14 @@ def create_evaluation_graphs_and_databases():
 
 
     print("populating pipeline graphs for", graphdb_autoeda_repo)
-    for graph in tqdm(autoeda_graphs):
-        graph_content = get_graph_content(
-            graphdb_endpoint, graphdb_all_kaggle_repo, named_graph_uri=graph
-        )
-        upload_graph(graph_content, graphdb_endpoint, graphdb_autoeda_repo, graph)
+    args = [(graph, graphdb_endpoint, graphdb_all_kaggle_repo, graphdb_autoeda_repo) for graph in autoeda_graphs]
+    pool = mp.Pool()
+    list(tqdm(pool.imap_unordered(upload_pipeline_subgraph_to_evaluation_graph, args), total=len(args)))
+    # for graph in tqdm(autoeda_graphs):
+    #     graph_content = get_graph_content(
+    #         graphdb_endpoint, graphdb_all_kaggle_repo, named_graph_uri=graph
+    #     )
+    #     upload_graph(graph_content, graphdb_endpoint, graphdb_autoeda_repo, graph)
 
     # B. Postgres DBs
     print('Creating Embedding database')
@@ -362,5 +357,6 @@ def create_evaluation_graphs_and_databases():
 initialize_autoeda()
 
 if __name__ == '__main__':
-    flask_app.run(host='127.0.0.1', port=8080)
+    pass
+    app.run(host='127.0.0.1', port=8080)
 

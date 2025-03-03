@@ -46,5 +46,5 @@ class NamedEntityProfileCreator(TextualProfileCreator):
             if fasttext_words:
                 input_values.append(np.average([self.fasttext_model.get_word_vector(word) for word in fasttext_words],
                                                axis=0))
-        input_tensor = torch.FloatTensor(input_values).to(device)
+        input_tensor = torch.FloatTensor(np.array(input_values)).to(device)
         return input_tensor

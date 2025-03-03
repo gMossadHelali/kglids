@@ -19,43 +19,44 @@ def create_graphdb_repo(graphdb_endpoint, graphdb_repo_name):
     # remove existing repo if found
     headers = {"Content-Type": "application/json"}
     if graphdb_repo_name in graphdb_repo_ids:
-        if KGLiDSConfig.replace_existing_graphdb_repo:
-            url = f"{graphdb_endpoint}/rest/repositories/{graphdb_repo_name}"
-            response = requests.delete(url)
-            if response.status_code // 100 != 2:
-                print(datetime.now(), ': Error while deleting GraphDB repo:', graphdb_repo_name, ':',
-                      response.text)
-    else:
-        # create a new repo
-        url = graphdb_endpoint + '/rest/repositories'
-        data = {
-            "id": graphdb_repo_name,
-            "type": "graphdb",
-            "title": graphdb_repo_name,
-            "params": {
-                "defaultNS": {
-                    "name": "defaultNS",
-                    "label": "Default namespaces for imports(';' delimited)",
-                    "value": ""
-                },
-                "imports": {
-                    "name": "imports",
-                    "label": "Imported RDF files(';' delimited)",
-                    "value": ""
-                },
-                "enableContextIndex": {
-                    "name": "enableContextIndex",
-                    "label": "Enable context index",
-                    "value": "true"
-                }
+        if not KGLiDSConfig.replace_existing_graphdb_repo:
+            return
+        url = f"{graphdb_endpoint}/rest/repositories/{graphdb_repo_name}"
+        response = requests.delete(url)
+        if response.status_code // 100 != 2:
+            print(datetime.now(), ': Error while deleting GraphDB repo:', graphdb_repo_name, ':',
+                  response.text)
+
+    # create a new repo
+    url = graphdb_endpoint + '/rest/repositories'
+    data = {
+        "id": graphdb_repo_name,
+        "type": "graphdb",
+        "title": graphdb_repo_name,
+        "params": {
+            "defaultNS": {
+                "name": "defaultNS",
+                "label": "Default namespaces for imports(';' delimited)",
+                "value": ""
+            },
+            "imports": {
+                "name": "imports",
+                "label": "Imported RDF files(';' delimited)",
+                "value": ""
+            },
+            "enableContextIndex": {
+                "name": "enableContextIndex",
+                "label": "Enable context index",
+                "value": "true"
             }
         }
-        response = requests.post(url, headers=headers, data=json.dumps(data))
-        if response.status_code // 100 != 2:
-            print(datetime.now(), "Error creating the GraphDB repo:", graphdb_repo_name, ':',
-                  response.text)
-        else:
-            print(datetime.now(), "Created GraphDB repo:", graphdb_repo_name)
+    }
+    response = requests.post(url, headers=headers, data=json.dumps(data))
+    if response.status_code // 100 != 2:
+        print(datetime.now(), "Error creating the GraphDB repo:", graphdb_repo_name, ':',
+              response.text)
+    else:
+        print(datetime.now(), "Created GraphDB repo:", graphdb_repo_name)
 
 
 def populate_pipeline_graphs(pipeline_graphs_base_dir, graphdb_endpoint, graphdb_repo):
