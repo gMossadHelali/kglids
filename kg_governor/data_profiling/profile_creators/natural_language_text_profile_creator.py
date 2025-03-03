@@ -1,18 +1,21 @@
 import os
-
+import random
 import numpy as np
 import pandas as pd
 import torch
 import fasttext
-fasttext.FastText.eprint = lambda *args,**kwargs: None
+
+fasttext.FastText.eprint = lambda *args, **kwargs: None
 from nltk.tokenize import TweetTokenizer
 
 from kg_governor.data_profiling.profile_creators.textual_profile_creator import TextualProfileCreator
 from kg_governor.data_profiling.model.table import Table
 from kg_governor.data_profiling.model.column_data_type import ColumnDataType
-from kg_governor.data_profiling.column_embeddings.natural_language_model import NaturalLanguageEmbeddingModel, NaturalLanguageScalingModel
+from kg_governor.data_profiling.column_embeddings.natural_language_model import NaturalLanguageEmbeddingModel, \
+    NaturalLanguageScalingModel
 from kg_governor.data_profiling.column_embeddings.column_embeddings_utils import load_pretrained_model
 from kglids_config import KGLiDSConfig
+
 
 class NaturalLanguageTextProfileCreator(TextualProfileCreator):
 
@@ -24,25 +27,31 @@ class NaturalLanguageTextProfileCreator(TextualProfileCreator):
 
         self.fasttext_model = fasttext_model
 
-        embedding_model_path = os.path.join(KGLiDSConfig.base_dir, 'kg_governor/data_profiling/column_embeddings/pretrained_models/natural_language_text/20230113132355_natural_language_text_model_embedding_epoch_94.pt')
-        scaling_model_path = os.path.join(KGLiDSConfig.base_dir, 'kg_governor/data_profiling/column_embeddings/pretrained_models/natural_language_text/20230113132355_natural_language_text_model_scaling_epoch_94.pt')
+        embedding_model_path = os.path.join(KGLiDSConfig.base_dir,
+                                            'kg_governor/data_profiling/column_embeddings/pretrained_models/natural_language_text/20230113132355_natural_language_text_model_embedding_epoch_94.pt')
+        scaling_model_path = os.path.join(KGLiDSConfig.base_dir,
+                                          'kg_governor/data_profiling/column_embeddings/pretrained_models/natural_language_text/20230113132355_natural_language_text_model_scaling_epoch_94.pt')
 
         self.embedding_model = load_pretrained_model(NaturalLanguageEmbeddingModel, embedding_model_path)
         self.scaling_model = load_pretrained_model(NaturalLanguageScalingModel, scaling_model_path)
 
     def _preprocess_column_for_embedding_model(self, device='cpu') -> torch.tensor:
+
         non_missing = self.column.dropna()
         if len(non_missing) > 10000:
-            sample = non_missing.sample(int(0.1*len(non_missing)))
+            sample = non_missing.sample(int(0.1 * len(non_missing)))
         else:
             sample = non_missing.sample(min(len(non_missing), 1000))
-        tokenizer = TweetTokenizer()
 
+        tokenizer = TweetTokenizer()
         input_values = []
         for text in sample.values:
-            fasttext_words = [word for word in tokenizer.tokenize(text) if self.fasttext_model.get_word_id(word) != -1]
+            tokens = tokenizer.tokenize(text)
+            tokens = random.sample(tokens, min(100, len(tokens)))
+            fasttext_words = [self.fasttext_model.get_word_vector(word) for word in tokens if
+                              self.fasttext_model.get_word_id(word) != -1]
             if fasttext_words:
-                input_values.append(np.average([self.fasttext_model.get_word_vector(word) for word in fasttext_words],
-                                               axis=0))
-        input_tensor = torch.FloatTensor(input_values).to(device)
+                input_values.append(np.average(fasttext_words, axis=0))
+
+        input_tensor = torch.FloatTensor(np.array(input_values)).to(device)
         return input_tensor

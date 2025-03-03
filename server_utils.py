@@ -129,6 +129,30 @@ def copy_embedding_db(source_db_name, target_db_name):
     cursor.execute(f'ALTER TABLE {source_db_name} RENAME TO {target_db_name}')
 
 
+def upload_dataset_subgraph_to_evaluation_graph(args):
+    data_source_uri, dataset_id, graphdb_endpoint, graphdb_all_kaggle_repo, graphdb_autoeda_repo = args
+    dataset_uri = f"<{data_source_uri}/{dataset_id}>"
+    graph_query = """
+    PREFIX kglids: <http://kglids.org/ontology/>
+    construct {?s ?p ?o}
+    WHERE {
+    ?s kglids:isPartOf+ %s.
+    ?s ?p ?o . 
+    } """ % dataset_uri
+    graph_content = get_graph_content(
+        graphdb_endpoint, graphdb_all_kaggle_repo, graph_query=graph_query
+    )
+    upload_graph(graph_content, graphdb_endpoint, graphdb_autoeda_repo)
+
+
+def upload_pipeline_subgraph_to_evaluation_graph(args):
+    graph, graphdb_endpoint, graphdb_all_kaggle_repo, graphdb_autoeda_repo = args
+    graph_content = get_graph_content(
+        graphdb_endpoint, graphdb_all_kaggle_repo, named_graph_uri=graph
+    )
+    upload_graph(graph_content, graphdb_endpoint, graphdb_autoeda_repo, graph)
+
+
 def create_evaluation_embedding_dbs(test_dataset_ids, embedding_db_name, autoeda_embedding_db_name):
     copy_embedding_db(embedding_db_name, autoeda_embedding_db_name)
 

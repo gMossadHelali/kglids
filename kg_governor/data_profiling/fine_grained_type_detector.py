@@ -45,7 +45,7 @@ class FineGrainedColumnTypeDetector:
     def __is_natural_language(column: pd.Series, fasttext_model):
         num_natural_language_values = 0
         for value in column.values:
-            tokens = FineGrainedColumnTypeDetector.tokenizer.tokenize(value)
+            tokens = FineGrainedColumnTypeDetector.tokenizer.tokenize(value[:100])
             num_tokens_in_fasttext = sum([fasttext_model.get_word_id(token) != -1
                                           for token in tokens])
             if num_tokens_in_fasttext > 0.5 * len(tokens):
@@ -58,6 +58,8 @@ class FineGrainedColumnTypeDetector:
     def __is_named_entity(column: pd.Series, ner_model):
         num_named_entity_values = 0
         for value in column.values:
+            if len(value) > 50:
+                continue
             tokens = ner_model(value)
             non_puncts = len([token for token in tokens if not token.is_punct and not token.is_space])
             if len(tokens.ents) == non_puncts:

@@ -22,7 +22,7 @@ class KGLiDSConfig:
     # whether to replace existing GraphDB repository
     replace_existing_graphdb_repo = True
     # name of the database on Postgres to load the column embeddings
-    pgvector_db_name = f'{data_source}_embeddings'
+    column_embeddings_db_name = f'{data_source}_column_embeddings'
 
     ####### Spark configs #######
     # whether to run Spark in local or cluster mode.
